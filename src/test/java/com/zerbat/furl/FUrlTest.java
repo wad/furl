@@ -140,10 +140,10 @@ public class FUrlTest {
         };
 
         FUrl FUrl = new FUrl();
-        runNomalizerTests(FUrl, data);
+        runNormalizerTests(FUrl, data);
     }
 
-    private void runNomalizerTests(FUrl FUrl, String[][] data) throws IOException {
+    private void runNormalizerTests(FUrl FUrl, String[][] data) throws IOException {
         for (String[] testData : data) {
 
             // here's the data
