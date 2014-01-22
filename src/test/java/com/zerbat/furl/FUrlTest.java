@@ -139,11 +139,11 @@ public class FUrlTest {
                 {"http:  //  wineaccess.ca/slasher", "wineaccess.ca/slasher"},
         };
 
-        FUrl FUrl = new FUrl();
-        runNormalizerTests(FUrl, data);
+        FUrl tool = new FUrl();
+        runNormalizerTests(tool, data);
     }
 
-    private void runNormalizerTests(FUrl FUrl, String[][] data) throws IOException {
+    private void runNormalizerTests(FUrl tool, String[][] data) throws IOException {
         for (String[] testData : data) {
 
             // here's the data
@@ -153,8 +153,8 @@ public class FUrlTest {
             System.out.println("Trying: [" + rawUrl + "]");
 
             // scan the URL
-            FUrl.scanUrl(rawUrl);
-            String actualNormalizedUrl = FUrl.getUrlNormalizedForGrouping();
+            tool.scanUrl(rawUrl);
+            String actualNormalizedUrl = tool.getUrlNormalizedForGrouping();
 
             // check the result of the normalization
             assertEquals("Unexpected output", expectedNormalizedUrl, actualNormalizedUrl);
@@ -164,118 +164,118 @@ public class FUrlTest {
     @Test
     public void testUrlScanning() throws Exception {
         // try empty strings
-        FUrl FUrl = new FUrl();
+        FUrl tool = new FUrl();
         String url = "";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "", "", "", "", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "", "", "", "", "", "");
 
         // happy case
         url = "http://example.com/index.html?qqq=zzz&ppp=rrr#splat=boink";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "http://", "example.com", "", "", "?qqq=zzz&ppp=rrr", "#splat=boink");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "http://", "example.com", "", "", "?qqq=zzz&ppp=rrr", "#splat=boink");
 
         // try without a protocol
         url = "example.com/index.html";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "http://", "example.com", "", TRAILING_SLASH, "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "http://", "example.com", "", TRAILING_SLASH, "", "");
 
         // try without a '.' character
         url = "example";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "http://", "example", "", TRAILING_SLASH, "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "http://", "example", "", TRAILING_SLASH, "", "");
 
         // try with only a single / character
         url = "http:/example.com";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "http://", "http", "", "/example.com", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "http://", "http", "", "/example.com", "", "");
 
         // try with three '/' characters for the protocol
         url = "file:///file.txt";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "file://", "", "", "/file.txt", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "file://", "", "", "/file.txt", "", "");
 
         // try with the :// but nothing afterwards (a degenerate case)
         url = "http://";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "", "", "", "", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "", "", "", "", "", "");
 
         // try with the :/ but nothing afterwards (a degenerate case)
         url = "http:/";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "", "", "", "", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "", "", "", "", "", "");
 
         // try with the : but nothing afterwards (a degenerate case)
         url = "http:";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "", "", "", "", "", "");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "", "", "", "", "", "");
 
         // try with an anchor segment
         url = "abc.com/#w";
-        FUrl.scanUrl(url);
-        verifySegments(url, FUrl, "http://", "abc.com", "", TRAILING_SLASH, "", "#w");
+        tool.scanUrl(url);
+        verifySegments(url, tool, "http://", "abc.com", "", TRAILING_SLASH, "", "#w");
 
         // check the hostname segment, but without the "www." part.
         url = "www.z.com";
-        FUrl.scanUrl(url);
-        assertEquals("didn't match", "z.com", FUrl.getSegmentHostnameWithoutPrecedingWww());
+        tool.scanUrl(url);
+        assertEquals("didn't match", "z.com", tool.getSegmentHostnameWithoutPrecedingWww());
 
         // check the hostname segment, but without the "www45." part.
         url = "www45.z.com";
-        FUrl.scanUrl(url);
-        assertEquals("didn't match", "z.com", FUrl.getSegmentHostnameWithoutPrecedingWww());
+        tool.scanUrl(url);
+        assertEquals("didn't match", "z.com", tool.getSegmentHostnameWithoutPrecedingWww());
     }
 
-    private void verifySegments(String url, FUrl FUrl, String scheme, String hostname, String port, String path, String query, String anchor) {
-        assertEquals("For [" + url + "], scheme doesn't match", scheme, FUrl.getSegmentScheme());
-        assertEquals("For [" + url + "], hostname doesn't match", hostname, FUrl.getSegmentHostname());
-        assertEquals("For [" + url + "], port doesn't match", port, FUrl.getSegmentPort());
-        assertEquals("For [" + url + "], path doesn't match", path, FUrl.getSegmentPath());
-        assertEquals("For [" + url + "], query doesn't match", query, FUrl.getSegmentQuery());
-        assertEquals("For [" + url + "], anchor doesn't match", anchor, FUrl.getSegmentAnchor());
+    private void verifySegments(String url, FUrl tool, String scheme, String hostname, String port, String path, String query, String anchor) {
+        assertEquals("For [" + url + "], scheme doesn't match", scheme, tool.getSegmentScheme());
+        assertEquals("For [" + url + "], hostname doesn't match", hostname, tool.getSegmentHostname());
+        assertEquals("For [" + url + "], port doesn't match", port, tool.getSegmentPort());
+        assertEquals("For [" + url + "], path doesn't match", path, tool.getSegmentPath());
+        assertEquals("For [" + url + "], query doesn't match", query, tool.getSegmentQuery());
+        assertEquals("For [" + url + "], anchor doesn't match", anchor, tool.getSegmentAnchor());
     }
 
     @Test
     public void testUrlShouldBeDiscarded() throws Exception {
         String url = "";
-        FUrl FUrl = new FUrl();
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        FUrl tool = new FUrl();
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "-";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "file://example.com";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "file:///example.com";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "file:///C:/jsox/10%20Essential%20Business%20Leadership%20Skills.htm";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "http://example/whatever.html";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "example/whatever.html";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "http://123.45.12.6/index.html";
-        FUrl.scanUrl(url);
-        assertTrue(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertTrue(tool.urlShouldBeDiscarded());
 
         url = "http://blah.com/127.0.0.1/blue";
-        FUrl.scanUrl(url);
-        assertFalse(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertFalse(tool.urlShouldBeDiscarded());
 
         url = "http://abc.com:80/index.html?abc=def&qqq=rrr";
-        FUrl.scanUrl(url);
-        assertFalse(FUrl.urlShouldBeDiscarded());
+        tool.scanUrl(url);
+        assertFalse(tool.urlShouldBeDiscarded());
     }
 
     @Test
@@ -562,4 +562,3 @@ public class FUrlTest {
     }
 
 }
-
