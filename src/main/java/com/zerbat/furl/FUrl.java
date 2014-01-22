@@ -26,43 +26,43 @@ import java.util.*;
 public class FUrl {
 
     // Holds the original URL that was scanned.
-    private String originalUrl;
+    String originalUrl;
 
     // This buffer is used to store the scanned URL string.
-    private char[] urlBuffer;
+    char[] urlBuffer;
 
     // This buffer is used to store the assembled URL
-    private char[] assemblyBuffer;
+    char[] assemblyBuffer;
 
     // 2k is the limit of IE6, so it's probably good for our use here.
-    private static final int DEFAULT_URL_BUFFER_SIZE = 2048;
-    private static final int DEFAULT_ASSEMBLY_BUFFER_SIZE = 2048;
+    static final int DEFAULT_URL_BUFFER_SIZE = 2048;
+    static final int DEFAULT_ASSEMBLY_BUFFER_SIZE = 2048;
 
-    private int urlBufferSize;
-    private int assemblyBufferSize;
+    int urlBufferSize;
+    int assemblyBufferSize;
 
     // this array holds indexes into buf, and how long each section is.
-    private int[][] offsets;
+    int[][] offsets;
 
     // description of the two columns of the array.
-    private static final int INDEX = 0;
-    private static final int LENGTH = 1;
-    private static final int MAX_COLUMNS = 2;
+    static final int INDEX = 0;
+    static final int LENGTH = 1;
+    static final int MAX_COLUMNS = 2;
 
     /**
      * First part of a url, something like "http". It doesn't include the "://" part.
      */
-    private static final int SCHEME = 0;
+    static final int SCHEME = 0;
 
     /**
      * also the domain name, or the IP address, something like "www.example.com".
      */
-    private static final int HOSTNAME = 1;
+    static final int HOSTNAME = 1;
 
     /**
      * always a number, like "80", "443" or "8080". Is not preceeded here by ':', though that is what distinguishes it.
      */
-    private static final int PORT = 2;
+    static final int PORT = 2;
 
     /**
      * this specifies where the document is, and includes the document. It always starts with '/' though that is
@@ -73,29 +73,49 @@ public class FUrl {
      * "doc.html"
      * "index.html"
      */
-    private static final int PATH = 3;
+    static final int PATH = 3;
 
     /**
      * starts with '?' though that is not included here. Subsequent query parts are separated by '&' characters.
      * Example: "abc=def&ppp=rrr" (note that the preceeding '?' is assumed.)
      */
-    private static final int QUERY = 4;
+    static final int QUERY = 4;
 
     /**
      * starts with '#', and is the last part of a URL. The '#' character is omitted here.
      * Example: "anchorIsHere" (the preceeding '#' is implied.)
      */
-    private static final int ANCHOR = 5;
+    static final int ANCHOR = 5;
 
     // This is one more than the ANCHOR index, or whatever the last index is above.
-    private static final int MAX_POSITIONS_NOTED = 6;
+    static final int MAX_POSITIONS_NOTED = 6;
 
     // This is used in the positionIndexesAndLengths array to indicate that something was not yet visited.
-    private static final int NOT_VISITED = -1;
+    static final int NOT_VISITED = -1;
 
     // When assembling a return value, many methods share usage of this member variable.
     // It keeps track of where in the assembly buffer stuff should be added.
-    private int assemblyBufferIndex;
+    int assemblyBufferIndex;
+
+    // this is the index into the url string
+    int urlIndex = 0;
+
+    // this is the index into the urlBuffer. We start at zero.
+    int urlBufferIndex = 0;
+
+    // the segment advances through the various parts of the URL,
+    // from SCHEME to HOSTNAME to PORT to PATH to QUERY.
+    // For example, take http://example.com:80/somedir/index.html?abc=def&ghi=jkl#qqq=rrr
+    // SCHEME=http
+    // HOSTNAME=example.com
+    // PORT=80
+    // PATH=/somedir/index.html
+    // QUERY=?abc=def&ghi=jkl
+    // ANCHOR=#qqq=rrr
+    int currentSegment = SCHEME;
+
+    // this flag is TRUE to keep going, false otherwise.
+    boolean keepScanningUrl = true;
 
     /**
      * This constructor applies the default buffer sizes
@@ -169,25 +189,10 @@ public class FUrl {
         try {
             int size = originalUrl.length();
 
-            // this is the index into the url string
-            int urlIndex = 0;
-
-            // this is the index into the urlBuffer. We start at zero.
-            int urlBufferIndex = 0;
-
-            // the segment advances through the various parts of the URL,
-            // from SCHEME to HOSTNAME to PORT to PATH to QUERY.
-            // For example, take http://example.com:80/somedir/index.html?abc=def&ghi=jkl#qqq=rrr
-            // SCHEME=http
-            // HOSTNAME=example.com
-            // PORT=80
-            // PATH=/somedir/index.html
-            // QUERY=?abc=def&ghi=jkl
-            // ANCHOR=#qqq=rrr
-            int currentSegment = SCHEME;
-
-            // this flag is TRUE to keep going, false otherwise.
-            boolean keepScanningUrl = true;
+            urlIndex = 0;
+            urlBufferIndex = 0;
+            currentSegment = SCHEME;
+            keepScanningUrl = true;
 
             while (keepScanningUrl && (urlIndex < size)) {
 
@@ -215,424 +220,38 @@ public class FUrl {
                     // if it's anything other than that, such as a '.' '/' or '-', then it must be the hostname: change the
                     // current segment to HOSTNAME and start over.
                     case SCHEME:
-                        // check to see if the current character is valid for this segment
-                        if (isAlphanumeric(c)) {
-                            // check to see if we've started chomping through this segment of the url
-                            if (segmentNotFoundYet(SCHEME)) {
-                                // We're at the start of this segment, capture the index.
-                                offsets[SCHEME][INDEX] = urlBufferIndex;
-                            }
-                            // Capture the character into the buffer, and proceed on to the next character.
-                            urlBuffer[urlBufferIndex++] = toLower(c);
-                            urlIndex++;
-                        } else {
-                            // we are either at some trash at the start, or have reached the end of the scheme,
-                            // or there was no scheme specified, in which case we're probably in the hostname.
-                            if (segmentNotFoundYet(SCHEME)) {
-                                // we haven't even started on the scheme yet, but already we found odd characters.
-                                // give the hostname segment a shot at it.
-                                offsets[SCHEME][INDEX] = 0;
-                                offsets[SCHEME][LENGTH] = 0;
-                                currentSegment = HOSTNAME;
-                            } else {
-                                // at the end of the scheme, or this wasn't a scheme.
-
-                                // check the character we just saw
-                                if (c == ':') {
-                                    // check the next two characters also
-                                    if (urlIndex + 2 >= size) {
-                                        // there aren't enough remaining characters. Eject.
-                                        offsets[SCHEME][INDEX] = NOT_VISITED;
-                                        offsets[SCHEME][LENGTH] = NOT_VISITED;
-                                        keepScanningUrl = false;
-                                    } else {
-                                        // there are two more characters, but are they the expected ones?
-                                        if (originalUrl.charAt(urlIndex + 1) == '/' && originalUrl.charAt(urlIndex + 2) == '/') {
-                                            // the next two characters are "//", so it must have been the scheme.
-
-                                            // set the length of the scheme segment
-                                            offsets[SCHEME][LENGTH] = urlBufferIndex - offsets[SCHEME][INDEX];
-
-                                            // skip the '://'
-                                            urlIndex += 3;
-                                        } else {
-                                            // the next two characters weren't "//", so it must not have been the scheme.
-                                            // It was probably the hostname (the ':' preceeds the port)
-                                            // Start over, checking for hostname instead of scheme.
-                                            offsets[SCHEME][INDEX] = NOT_VISITED;
-                                            urlIndex = 0;
-                                            urlBufferIndex = 0;
-                                        }
-
-                                        // advance to the next segment
-                                        currentSegment = HOSTNAME;
-                                    }
-                                } else {
-                                    // Whoops, this wasn't the scheme. It must have been the hostname.
-
-                                    // blank out the scheme
-                                    offsets[SCHEME][INDEX] = 0;
-                                    offsets[SCHEME][LENGTH] = 0;
-
-                                    // start over, but look for a hostname now, instead of a scheme
-                                    // (There is a performance tweak that could be implemented here
-                                    // to avoid starting the scan over, but it's trickier than you might think.)
-                                    currentSegment = HOSTNAME;
-                                    offsets[HOSTNAME][INDEX] = NOT_VISITED;
-                                    offsets[HOSTNAME][LENGTH] = NOT_VISITED;
-                                    urlBufferIndex = 0;
-                                    urlIndex = 0;
-                                }
-                            }
-                        }
-
-                        // Ran out of url to scan, or no room in the buffer. Keep what we found as the hostname.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            // check to see if our scheme length has already been calculated
-                            // if it was, then that means that we found the scheme. Otherwise, take what we got as the hostname.
-                            if (offsets[SCHEME][LENGTH] == NOT_VISITED) {
-                                // didn't manage to find the scheme. Just call when we found as the hostname
-                                offsets[HOSTNAME][INDEX] = offsets[SCHEME][INDEX];
-                                offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[SCHEME][INDEX];
-
-                                // set an empty scheme
-                                offsets[SCHEME][INDEX] = 0;
-                                offsets[SCHEME][LENGTH] = 0;
-
-                                // set an empty path
-                                offsets[PATH][INDEX] = urlBufferIndex;
-                                offsets[PATH][LENGTH] = 0;
-                            }
-                            keepScanningUrl = false;
-                        }
+                        scanScheme(size, c);
                         break;
 
                     // For this segment, accept only alphanumeric characters, along with '.' and '-'. Once anything
                     // else is found, we must be out of the domain name.
                     case HOSTNAME:
-
-                        if (segmentNotFoundYet(HOSTNAME)) {
-                            if (isAlphanumeric(c)) {
-                                // We're at the start of this segment, capture the index
-                                offsets[HOSTNAME][INDEX] = urlBufferIndex;
-
-                                // Capture the character into the buffer, and proceed on to the next character.
-                                urlBuffer[urlBufferIndex++] = toLower(c);
-                                urlIndex++;
-                            } else if (c == '/') {
-                                // It could be that there is no host specified, as in "file:///document.txt"
-                                offsets[HOSTNAME][INDEX] = urlBufferIndex;
-                                offsets[HOSTNAME][LENGTH] = 0;
-                                currentSegment = PATH;
-                            } else if (c == '.') {
-                                // trim off leading '.' characters
-                                urlIndex++;
-                            } else {
-                                // not a valid hostname
-                                keepScanningUrl = false;
-                            }
-                        } else {
-                            // underscores aren't usually permitted in URLs, but we're letting them be here for the chukwa demux.
-                            if (isAlphanumeric(c) || c == '.' || c == '-' || c == '_') {
-                                // Capture the character into the buffer, and proceed on to the next character.
-                                urlBuffer[urlBufferIndex++] = toLower(c);
-                                urlIndex++;
-                            } else {
-                                // found the end of the hostname
-                                offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[HOSTNAME][INDEX];
-
-                                // strip off any trailing '.' characters
-                                while (offsets[HOSTNAME][LENGTH] > 0 && urlBuffer[offsets[HOSTNAME][INDEX] + offsets[HOSTNAME][LENGTH] - 1] == '.') {
-                                    urlBufferIndex--;
-                                    offsets[HOSTNAME][LENGTH]--;
-                                }
-
-                                // advance to the next segment
-                                currentSegment = PORT;
-                            }
-                        }
-
-                        // Ran out of url to scan, or no room in the buffer. Keep what we found as the host.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            // set the length of the hostname segment
-                            offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[HOSTNAME][INDEX];
-
-                            // strip off any trailing '.' characters
-                            while (offsets[HOSTNAME][LENGTH] > 0 && urlBuffer[offsets[HOSTNAME][INDEX] + offsets[HOSTNAME][LENGTH] - 1] == '.') {
-                                urlBufferIndex--;
-                                offsets[HOSTNAME][LENGTH]--;
-                            }
-
-                            // set an empty path
-                            offsets[PATH][INDEX] = urlBufferIndex;
-                            offsets[PATH][LENGTH] = 0;
-
-                            keepScanningUrl = false;
-                        }
+                        scanHostname(size, c);
                         break;
 
                     // For this segment, accept only a ':' followed by numeric characters.
                     // If there is no ':', then assume there is no port.
                     case PORT:
-                        // are we just starting the port segment?
-                        if (segmentNotFoundYet(PORT)) {
-                            // yes, just starting. This first character must be a ':' if this is really a port.
-                            if (c == ':') {
-                                // yes, it looks like a port. Skip the ':' and proceed, but verify the next character is numeric first
-                                if (urlIndex + 1 < size) {
-                                    // there is at least one more character. If it's numeric, then proceed.
-                                    if (isNumeric(originalUrl.charAt(urlIndex + 1))) {
-                                        urlIndex++;
-                                        // don't increment the urlBufferIndex, because we're not keeping the ':' character.
-                                        offsets[PORT][INDEX] = urlBufferIndex;
-                                    } else {
-                                        // the next character isn't numeric. Why do we have a ':' followed by non-numeric characters?
-                                        // Let's assume there is no port, and move on.
-                                        urlIndex++;
-                                        currentSegment = PATH;
-                                    }
-                                } else {
-                                    // There is no next character, so ignore any port information, and eject
-                                    keepScanningUrl = false;
-                                }
-                            } else {
-                                // not a port. Set an empty port, and move to the next segment
-                                offsets[PORT][INDEX] = urlBufferIndex;
-                                offsets[PORT][LENGTH] = 0;
-                                currentSegment = PATH;
-                            }
-                        } else {
-                            // We're not at the beginning of the port segment. We are either chomping numbers, or have
-                            // just skipped the leading ':' character.
-                            if (isNumeric(c)) {
-                                // add this character to our port, then proceed to the next character.
-                                urlBuffer[urlBufferIndex++] = c;
-                                urlIndex++;
-                            } else {
-                                // the end of the port has been reached. Store the length, and move to the next segment.
-                                offsets[PORT][LENGTH] = urlBufferIndex - offsets[PORT][INDEX];
-                                currentSegment = PATH;
-                            }
-                        }
-
-                        // If we're past the end, just keep whatever port information we have.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            // set the length of the port
-                            offsets[PORT][LENGTH] = urlBufferIndex - offsets[PORT][INDEX];
-
-                            // set an empty path
-                            offsets[PATH][INDEX] = urlBufferIndex;
-                            offsets[PATH][LENGTH] = 0;
-
-                            keepScanningUrl = false;
-                        }
+                        scanPort(size, c);
                         break;
 
                     // The first character must either be '/' or '?'. If it's a '?', that means that there is no path
                     // specified, and we will proceed with the query segment.
                     // Once a '?' is discovered, that is the start of the optional query.
                     case PATH:
-                        // are we just starting with the path segment?
-                        if (segmentNotFoundYet(PATH)) {
-                            // just starting. Check the first character
-                            if (c == '/') {
-                                // Yep, this is the path. Skip the leading '/' character, we'll add it back when assembling.
-                                offsets[PATH][INDEX] = urlBufferIndex;
-                                urlIndex++;
-                            } else if ((c == '?') || (c == '&') || (c == '#')) {
-                                // looks like a subsequent segment has started.
-
-                                // Set an empty path and move on
-                                offsets[PATH][INDEX] = urlBufferIndex;
-                                offsets[PATH][LENGTH] = 0;
-
-                                currentSegment = QUERY;
-                            } else {
-                                // an unexpected character was encountered. Let's just bail.
-                                keepScanningUrl = false;
-                            }
-                        } else {
-                            // chomping through the path. Check the current character to see if we're done yet.
-                            if ((c == '?') || (c == '&') || (c == '#')) {
-                                // we've found what appears to be the start a later segment, the query.
-                                // Capture the length, and move to the next segment.
-                                offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
-                                currentSegment = QUERY;
-                            } else {
-                                // check the current character to see if it's an escape sequence
-                                if (c == '%') {
-                                    // it's an escape sequence, or at least part of one. Check the next two characters too.
-                                    if (urlIndex + 2 >= size) {
-                                        // not enough characters for this to be an escape sequence
-                                        // just end it here, not including this escape sequence.
-                                        // set the length of the path segment
-                                        offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
-                                        keepScanningUrl = false;
-                                    } else {
-                                        // check to see if the next two characters are alphanumeric.
-                                        if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
-                                            // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
-                                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
-                                            urlIndex++;
-
-                                            // preserve the next two characters, but in uppercase
-                                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                        } else {
-                                            // they are not both alphanumeric. This is a strange state... just keep the '%'
-                                            // and move on in case the next characters moves to a different segment or something.
-                                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
-                                            urlIndex++;
-                                        }
-                                    }
-                                } else {
-                                    // check to see if we've got multiple consecutive slashes. We only need one.
-                                    char nextCharacter = urlIndex + 1 < size ? originalUrl.charAt(urlIndex + 1) : '\0';
-                                    if (c == '/' && nextCharacter == '/') {
-                                        // skip this extra slash
-                                        urlIndex++;
-                                    } else {
-                                        // keep chomping
-                                        urlBuffer[urlBufferIndex++] = c;
-                                        urlIndex++;
-                                    }
-                                }
-                            }
-                        }
-
-                        // If we're past the end, just keep whatever path information we have.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            // set the length of the path segment
-                            offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
-
-                            keepScanningUrl = false;
-                        }
+                        scanPath(size, c);
                         break;
 
                     // the first character must be '?', or it's not query, and we've incorrectly passed the end
                     // of the path segment.
                     case QUERY:
-                        // Check to see if we're just entering this segment.
-                        if (segmentNotFoundYet(QUERY)) {
-                            // Yes, we're just entering this segment.
-                            if (c == '?' || c == '&') {
-
-                                // snag the starting point
-                                offsets[QUERY][INDEX] = urlBufferIndex;
-
-                                // skip the '?' or '&' character
-                                urlIndex++;
-                            } else if (c == '#') {
-                                // looks like there is no query, but there is an anchor.
-                                offsets[QUERY][INDEX] = urlBufferIndex;
-                                offsets[QUERY][LENGTH] = 0;
-
-                                currentSegment = ANCHOR;
-                            } else {
-                                // Huh? We shouldn't be able to get here.
-                                throw new Exception("Entered the QUERY segment, but it started with '" + c + "' instead of '?' or '#'.");
-                            }
-                        } else {
-                            if (c == '#') {
-                                // We've reached the end of the query segment, and entered the anchor segment.
-                                offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
-                                currentSegment = ANCHOR;
-                            } else {
-                                // check the current character to see if it's an escape sequence
-                                if (c == '%') {
-                                    // it's an escape sequence, or at least part of one. Check the next two characters too.
-                                    if (urlIndex + 2 >= size) {
-                                        // not enough characters for this to be an escape sequence
-                                        // just end it here, not including this escape sequence.
-                                        // set the length of the path segment
-                                        offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
-                                        keepScanningUrl = false;
-                                    } else {
-                                        // check to see if the next two characters are alphanumeric.
-                                        if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
-                                            // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
-                                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
-                                            urlIndex++;
-
-                                            // preserve the next two characters, but in uppercase
-                                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                        } else {
-                                            // they are not both alphanumeric. This is a strange state... just keep the '%'
-                                            // and move on in case the next characters moves to a different segment or something.
-                                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
-                                            urlIndex++;
-                                        }
-                                    }
-                                } else {
-                                    // continue to chomp through it
-                                    urlBuffer[urlBufferIndex++] = c;
-                                    urlIndex++;
-                                }
-                            }
-                        }
-
-                        // If we're past the end, just keep whatever query information we have.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
-                            keepScanningUrl = false;
-                        }
+                        scanQuery(size, c);
                         break;
 
                     // the first character must be '#' or it's not an anchor, and we're incorrectly passed the end
                     // of the query segment.
                     case ANCHOR:
-                        // Check to see if we're just entering this segment.
-                        if (segmentNotFoundYet(ANCHOR)) {
-                            // Yes, we're just entering this segment. The first character must be '#'.
-                            if (c == '#') {
-                                // snag the starting point
-                                offsets[ANCHOR][INDEX] = urlBufferIndex;
-
-                                // skip the '#' character
-                                urlIndex++;
-                            } else {
-                                // Huh? We shouldn't be able to get here.
-                                throw new Exception("Entered the ANCHOR segment, but it started with '" + c + "' instead of '#'");
-                            }
-                        } else {
-                            // check the current character to see if it's an escape sequence
-                            if (c == '%') {
-                                // it's an escape sequence, or at least part of one. Check the next two characters too.
-                                if (urlIndex + 2 >= size) {
-                                    // not enough characters for this to be an escape sequence
-                                    // just end it here, not including this escape sequence.
-                                    // set the length of the path segment
-                                    offsets[ANCHOR][LENGTH] = urlBufferIndex - offsets[ANCHOR][INDEX];
-                                    keepScanningUrl = false;
-                                } else {
-                                    // check to see if the next two characters are alphanumeric.
-                                    if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
-                                        // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
-                                        urlBuffer[urlBufferIndex++] = c; // save the '%' here
-                                        urlIndex++;
-
-                                        // preserve the next two characters, but in uppercase
-                                        urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                        urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
-                                    } else {
-                                        // they are not both alphanumeric. This is a strange state... just ignore the '%'
-                                        // and move on in case the next characters moves to a different segment or something.
-                                        urlIndex++;
-                                    }
-                                }
-                            } else {
-                                // continue to chomp through it
-                                urlBuffer[urlBufferIndex++] = c;
-                                urlIndex++;
-                            }
-                        }
-
-                        // If we're past the end, just keep whatever remaining anchor information we have.
-                        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
-                            offsets[ANCHOR][LENGTH] = urlBufferIndex - offsets[ANCHOR][INDEX];
-                            keepScanningUrl = false;
-                        }
+                        scanAnchor(size, c);
                         break;
 
                     // Unknown situation. Barf, it's a bug.
@@ -647,6 +266,415 @@ public class FUrl {
             throw new IOException("Failed to scan url: [" + rawUrl + "]", e);
         }
         return this;
+    }
+
+    void scanScheme(int size, char c) {
+        // check to see if the current character is valid for this segment
+        if (isAlphanumeric(c)) {
+            // check to see if we've started chomping through this segment of the url
+            if (segmentNotFoundYet(SCHEME)) {
+                // We're at the start of this segment, capture the index.
+                offsets[SCHEME][INDEX] = urlBufferIndex;
+            }
+            // Capture the character into the buffer, and proceed on to the next character.
+            urlBuffer[urlBufferIndex++] = toLower(c);
+            urlIndex++;
+        } else {
+            // we are either at some trash at the start, or have reached the end of the scheme,
+            // or there was no scheme specified, in which case we're probably in the hostname.
+            if (segmentNotFoundYet(SCHEME)) {
+                // we haven't even started on the scheme yet, but already we found odd characters.
+                // give the hostname segment a shot at it.
+                offsets[SCHEME][INDEX] = 0;
+                offsets[SCHEME][LENGTH] = 0;
+                currentSegment = HOSTNAME;
+            } else {
+                // at the end of the scheme, or this wasn't a scheme.
+
+                // check the character we just saw
+                if (c == ':') {
+                    // check the next two characters also
+                    if (urlIndex + 2 >= size) {
+                        // there aren't enough remaining characters. Eject.
+                        offsets[SCHEME][INDEX] = NOT_VISITED;
+                        offsets[SCHEME][LENGTH] = NOT_VISITED;
+                        keepScanningUrl = false;
+                    } else {
+                        // there are two more characters, but are they the expected ones?
+                        if (originalUrl.charAt(urlIndex + 1) == '/' && originalUrl.charAt(urlIndex + 2) == '/') {
+                            // the next two characters are "//", so it must have been the scheme.
+
+                            // set the length of the scheme segment
+                            offsets[SCHEME][LENGTH] = urlBufferIndex - offsets[SCHEME][INDEX];
+
+                            // skip the '://'
+                            urlIndex += 3;
+                        } else {
+                            // the next two characters weren't "//", so it must not have been the scheme.
+                            // It was probably the hostname (the ':' preceeds the port)
+                            // Start over, checking for hostname instead of scheme.
+                            offsets[SCHEME][INDEX] = NOT_VISITED;
+                            urlIndex = 0;
+                            urlBufferIndex = 0;
+                        }
+
+                        // advance to the next segment
+                        currentSegment = HOSTNAME;
+                    }
+                } else {
+                    // Whoops, this wasn't the scheme. It must have been the hostname.
+
+                    // blank out the scheme
+                    offsets[SCHEME][INDEX] = 0;
+                    offsets[SCHEME][LENGTH] = 0;
+
+                    // start over, but look for a hostname now, instead of a scheme
+                    // (There is a performance tweak that could be implemented here
+                    // to avoid starting the scan over, but it's trickier than you might think.)
+                    currentSegment = HOSTNAME;
+                    offsets[HOSTNAME][INDEX] = NOT_VISITED;
+                    offsets[HOSTNAME][LENGTH] = NOT_VISITED;
+                    urlBufferIndex = 0;
+                    urlIndex = 0;
+                }
+            }
+        }
+
+        // Ran out of url to scan, or no room in the buffer. Keep what we found as the hostname.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            // check to see if our scheme length has already been calculated
+            // if it was, then that means that we found the scheme. Otherwise, take what we got as the hostname.
+            if (offsets[SCHEME][LENGTH] == NOT_VISITED) {
+                // didn't manage to find the scheme. Just call when we found as the hostname
+                offsets[HOSTNAME][INDEX] = offsets[SCHEME][INDEX];
+                offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[SCHEME][INDEX];
+
+                // set an empty scheme
+                offsets[SCHEME][INDEX] = 0;
+                offsets[SCHEME][LENGTH] = 0;
+
+                // set an empty path
+                offsets[PATH][INDEX] = urlBufferIndex;
+                offsets[PATH][LENGTH] = 0;
+            }
+            keepScanningUrl = false;
+        }
+    }
+
+    void scanHostname(int size, char c) {
+        if (segmentNotFoundYet(HOSTNAME)) {
+            if (isAlphanumeric(c)) {
+                // We're at the start of this segment, capture the index
+                offsets[HOSTNAME][INDEX] = urlBufferIndex;
+
+                // Capture the character into the buffer, and proceed on to the next character.
+                urlBuffer[urlBufferIndex++] = toLower(c);
+                urlIndex++;
+            } else if (c == '/') {
+                // It could be that there is no host specified, as in "file:///document.txt"
+                offsets[HOSTNAME][INDEX] = urlBufferIndex;
+                offsets[HOSTNAME][LENGTH] = 0;
+                currentSegment = PATH;
+            } else if (c == '.') {
+                // trim off leading '.' characters
+                urlIndex++;
+            } else {
+                // not a valid hostname
+                keepScanningUrl = false;
+            }
+        } else {
+            // underscores aren't usually permitted in URLs, but we're letting them be here for the chukwa demux.
+            if (isAlphanumeric(c) || c == '.' || c == '-' || c == '_') {
+                // Capture the character into the buffer, and proceed on to the next character.
+                urlBuffer[urlBufferIndex++] = toLower(c);
+                urlIndex++;
+            } else {
+                // found the end of the hostname
+                offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[HOSTNAME][INDEX];
+
+                // strip off any trailing '.' characters
+                while (offsets[HOSTNAME][LENGTH] > 0 && urlBuffer[offsets[HOSTNAME][INDEX] + offsets[HOSTNAME][LENGTH] - 1] == '.') {
+                    urlBufferIndex--;
+                    offsets[HOSTNAME][LENGTH]--;
+                }
+
+                // advance to the next segment
+                currentSegment = PORT;
+            }
+        }
+
+        // Ran out of url to scan, or no room in the buffer. Keep what we found as the host.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            // set the length of the hostname segment
+            offsets[HOSTNAME][LENGTH] = urlBufferIndex - offsets[HOSTNAME][INDEX];
+
+            // strip off any trailing '.' characters
+            while (offsets[HOSTNAME][LENGTH] > 0 && urlBuffer[offsets[HOSTNAME][INDEX] + offsets[HOSTNAME][LENGTH] - 1] == '.') {
+                urlBufferIndex--;
+                offsets[HOSTNAME][LENGTH]--;
+            }
+
+            // set an empty path
+            offsets[PATH][INDEX] = urlBufferIndex;
+            offsets[PATH][LENGTH] = 0;
+
+            keepScanningUrl = false;
+        }
+    }
+
+    void scanPort(int size, char c) {
+        // are we just starting the port segment?
+        if (segmentNotFoundYet(PORT)) {
+            // yes, just starting. This first character must be a ':' if this is really a port.
+            if (c == ':') {
+                // yes, it looks like a port. Skip the ':' and proceed, but verify the next character is numeric first
+                if (urlIndex + 1 < size) {
+                    // there is at least one more character. If it's numeric, then proceed.
+                    if (isNumeric(originalUrl.charAt(urlIndex + 1))) {
+                        urlIndex++;
+                        // don't increment the urlBufferIndex, because we're not keeping the ':' character.
+                        offsets[PORT][INDEX] = urlBufferIndex;
+                    } else {
+                        // the next character isn't numeric. Why do we have a ':' followed by non-numeric characters?
+                        // Let's assume there is no port, and move on.
+                        urlIndex++;
+                        currentSegment = PATH;
+                    }
+                } else {
+                    // There is no next character, so ignore any port information, and eject
+                    keepScanningUrl = false;
+                }
+            } else {
+                // not a port. Set an empty port, and move to the next segment
+                offsets[PORT][INDEX] = urlBufferIndex;
+                offsets[PORT][LENGTH] = 0;
+                currentSegment = PATH;
+            }
+        } else {
+            // We're not at the beginning of the port segment. We are either chomping numbers, or have
+            // just skipped the leading ':' character.
+            if (isNumeric(c)) {
+                // add this character to our port, then proceed to the next character.
+                urlBuffer[urlBufferIndex++] = c;
+                urlIndex++;
+            } else {
+                // the end of the port has been reached. Store the length, and move to the next segment.
+                offsets[PORT][LENGTH] = urlBufferIndex - offsets[PORT][INDEX];
+                currentSegment = PATH;
+            }
+        }
+
+        // If we're past the end, just keep whatever port information we have.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            // set the length of the port
+            offsets[PORT][LENGTH] = urlBufferIndex - offsets[PORT][INDEX];
+
+            // set an empty path
+            offsets[PATH][INDEX] = urlBufferIndex;
+            offsets[PATH][LENGTH] = 0;
+
+            keepScanningUrl = false;
+        }
+    }
+
+    void scanPath(int size, char c) {
+        // are we just starting with the path segment?
+        if (segmentNotFoundYet(PATH)) {
+            // just starting. Check the first character
+            if (c == '/') {
+                // Yep, this is the path. Skip the leading '/' character, we'll add it back when assembling.
+                offsets[PATH][INDEX] = urlBufferIndex;
+                urlIndex++;
+            } else if ((c == '?') || (c == '&') || (c == '#')) {
+                // looks like a subsequent segment has started.
+
+                // Set an empty path and move on
+                offsets[PATH][INDEX] = urlBufferIndex;
+                offsets[PATH][LENGTH] = 0;
+
+                currentSegment = QUERY;
+            } else {
+                // an unexpected character was encountered. Let's just bail.
+                keepScanningUrl = false;
+            }
+        } else {
+            // chomping through the path. Check the current character to see if we're done yet.
+            if ((c == '?') || (c == '&') || (c == '#')) {
+                // we've found what appears to be the start a later segment, the query.
+                // Capture the length, and move to the next segment.
+                offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
+                currentSegment = QUERY;
+            } else {
+                // check the current character to see if it's an escape sequence
+                if (c == '%') {
+                    // it's an escape sequence, or at least part of one. Check the next two characters too.
+                    if (urlIndex + 2 >= size) {
+                        // not enough characters for this to be an escape sequence
+                        // just end it here, not including this escape sequence.
+                        // set the length of the path segment
+                        offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
+                        keepScanningUrl = false;
+                    } else {
+                        // check to see if the next two characters are alphanumeric.
+                        if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
+                            // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
+                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
+                            urlIndex++;
+
+                            // preserve the next two characters, but in uppercase
+                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                        } else {
+                            // they are not both alphanumeric. This is a strange state... just keep the '%'
+                            // and move on in case the next characters moves to a different segment or something.
+                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
+                            urlIndex++;
+                        }
+                    }
+                } else {
+                    // check to see if we've got multiple consecutive slashes. We only need one.
+                    char nextCharacter = urlIndex + 1 < size ? originalUrl.charAt(urlIndex + 1) : '\0';
+                    if (c == '/' && nextCharacter == '/') {
+                        // skip this extra slash
+                        urlIndex++;
+                    } else {
+                        // keep chomping
+                        urlBuffer[urlBufferIndex++] = c;
+                        urlIndex++;
+                    }
+                }
+            }
+        }
+
+        // If we're past the end, just keep whatever path information we have.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            // set the length of the path segment
+            offsets[PATH][LENGTH] = urlBufferIndex - offsets[PATH][INDEX];
+
+            keepScanningUrl = false;
+        }
+    }
+
+    void scanQuery(int size, char c) throws Exception {
+        // Check to see if we're just entering this segment.
+        if (segmentNotFoundYet(QUERY)) {
+            // Yes, we're just entering this segment.
+            if (c == '?' || c == '&') {
+
+                // snag the starting point
+                offsets[QUERY][INDEX] = urlBufferIndex;
+
+                // skip the '?' or '&' character
+                urlIndex++;
+            } else if (c == '#') {
+                // looks like there is no query, but there is an anchor.
+                offsets[QUERY][INDEX] = urlBufferIndex;
+                offsets[QUERY][LENGTH] = 0;
+
+                currentSegment = ANCHOR;
+            } else {
+                // Huh? We shouldn't be able to get here.
+                throw new Exception("Entered the QUERY segment, but it started with '" + c + "' instead of '?' or '#'.");
+            }
+        } else {
+            if (c == '#') {
+                // We've reached the end of the query segment, and entered the anchor segment.
+                offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
+                currentSegment = ANCHOR;
+            } else {
+                // check the current character to see if it's an escape sequence
+                if (c == '%') {
+                    // it's an escape sequence, or at least part of one. Check the next two characters too.
+                    if (urlIndex + 2 >= size) {
+                        // not enough characters for this to be an escape sequence
+                        // just end it here, not including this escape sequence.
+                        // set the length of the path segment
+                        offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
+                        keepScanningUrl = false;
+                    } else {
+                        // check to see if the next two characters are alphanumeric.
+                        if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
+                            // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
+                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
+                            urlIndex++;
+
+                            // preserve the next two characters, but in uppercase
+                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                            urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                        } else {
+                            // they are not both alphanumeric. This is a strange state... just keep the '%'
+                            // and move on in case the next characters moves to a different segment or something.
+                            urlBuffer[urlBufferIndex++] = c; // save the '%' here
+                            urlIndex++;
+                        }
+                    }
+                } else {
+                    // continue to chomp through it
+                    urlBuffer[urlBufferIndex++] = c;
+                    urlIndex++;
+                }
+            }
+        }
+
+        // If we're past the end, just keep whatever query information we have.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            offsets[QUERY][LENGTH] = urlBufferIndex - offsets[QUERY][INDEX];
+            keepScanningUrl = false;
+        }
+    }
+
+    void scanAnchor(int size, char c) throws Exception {
+        // Check to see if we're just entering this segment.
+        if (segmentNotFoundYet(ANCHOR)) {
+            // Yes, we're just entering this segment. The first character must be '#'.
+            if (c == '#') {
+                // snag the starting point
+                offsets[ANCHOR][INDEX] = urlBufferIndex;
+
+                // skip the '#' character
+                urlIndex++;
+            } else {
+                // Huh? We shouldn't be able to get here.
+                throw new Exception("Entered the ANCHOR segment, but it started with '" + c + "' instead of '#'");
+            }
+        } else {
+            // check the current character to see if it's an escape sequence
+            if (c == '%') {
+                // it's an escape sequence, or at least part of one. Check the next two characters too.
+                if (urlIndex + 2 >= size) {
+                    // not enough characters for this to be an escape sequence
+                    // just end it here, not including this escape sequence.
+                    // set the length of the path segment
+                    offsets[ANCHOR][LENGTH] = urlBufferIndex - offsets[ANCHOR][INDEX];
+                    keepScanningUrl = false;
+                } else {
+                    // check to see if the next two characters are alphanumeric.
+                    if (isAlphanumeric(originalUrl.charAt(urlIndex + 1)) && isAlphanumeric(originalUrl.charAt(urlIndex + 2))) {
+                        // they are. Looks like a valid escape sequence. Keep it, but uppercase the alphabetic characters.
+                        urlBuffer[urlBufferIndex++] = c; // save the '%' here
+                        urlIndex++;
+
+                        // preserve the next two characters, but in uppercase
+                        urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                        urlBuffer[urlBufferIndex++] = toUpper(originalUrl.charAt(urlIndex++));
+                    } else {
+                        // they are not both alphanumeric. This is a strange state... just ignore the '%'
+                        // and move on in case the next characters moves to a different segment or something.
+                        urlIndex++;
+                    }
+                }
+            } else {
+                // continue to chomp through it
+                urlBuffer[urlBufferIndex++] = c;
+                urlIndex++;
+            }
+        }
+
+        // If we're past the end, just keep whatever remaining anchor information we have.
+        if (urlIndex >= size || urlBufferIndex >= getAssemblyBufferSize()) {
+            offsets[ANCHOR][LENGTH] = urlBufferIndex - offsets[ANCHOR][INDEX];
+            keepScanningUrl = false;
+        }
     }
 
     /**
@@ -770,14 +798,14 @@ public class FUrl {
      * @param segmentIdentifier one of QUERY, HOSTNAME, etc
      * @return true if there is data for the specified segment.
      */
-    private boolean segmentDataExists(int segmentIdentifier) {
+    boolean segmentDataExists(int segmentIdentifier) {
         return offsets[segmentIdentifier][INDEX] != NOT_VISITED && offsets[segmentIdentifier][LENGTH] > 0;
     }
 
     /**
      * blank out the set of positions and lengths
      */
-    private void resetAllMarkers() {
+    void resetAllMarkers() {
         for (int i = 0; i < MAX_POSITIONS_NOTED; i++) {
             for (int j = 0; j < MAX_COLUMNS; j++) {
                 offsets[i][j] = NOT_VISITED;
@@ -785,11 +813,11 @@ public class FUrl {
         }
     }
 
-    private int getUrlBufferSize() {
+    int getUrlBufferSize() {
         return urlBufferSize;
     }
 
-    private int getAssemblyBufferSize() {
+    int getAssemblyBufferSize() {
         return assemblyBufferSize;
     }
 
@@ -877,7 +905,7 @@ public class FUrl {
     /**
      * Obtain this segment from the urlBuffer and copy it into the urlBuffer. If there is no scheme, create "http://".
      */
-    private void assembleScheme() {
+    void assembleScheme() {
         // put a scheme on it
         if (!segmentDataExists(SCHEME)) {
             // we don't have a scheme. Just use "http" here.
@@ -901,7 +929,7 @@ public class FUrl {
      *                         (a part of a hostname is what is between the dots.)
      *                         if there are 3 or more parts, and the first part starts with "www", drop the first part.
      */
-    private void assembleHostname(boolean keepPrecedingWww) {
+    void assembleHostname(boolean keepPrecedingWww) {
 
         // get the hostname
         if (segmentDataExists(HOSTNAME)) {
@@ -925,7 +953,7 @@ public class FUrl {
     /**
      * Obtain this segment from the urlBuffer and copy it into the urlBuffer. If the port is 80, it is ignored.
      */
-    private void assemblePortIfNot80() {
+    void assemblePortIfNot80() {
         // include the port only if it's not "80".
         if (segmentDataExists(PORT)) {
             // check to see if the port is 80
@@ -953,7 +981,7 @@ public class FUrl {
      * @param dropDefaultDocument should be TRUE if you want to change, for example, "z.com/abc/index.html" into
      *                            "z.com/abc/".
      */
-    private void assemblePath(boolean alwaysDropDocument,
+    void assemblePath(boolean alwaysDropDocument,
                               boolean dropDefaultDocument) {
 
         // here, this flag is TRUE if we should check to see if a '/' should be appended to the end
@@ -1055,7 +1083,7 @@ public class FUrl {
     /**
      * Obtain this segment from the urlBuffer and copy it into the urlBuffer.
      */
-    private void assembleQuery() {
+    void assembleQuery() {
         // get the query, if there is one and we want it
         if (segmentDataExists(QUERY)) {
             continueAssemblingQuery();
@@ -1065,7 +1093,7 @@ public class FUrl {
     /**
      * This cleans up the query parameter identification characters, and puts the string into the assembly buffer
      */
-    private void continueAssemblingQuery() {
+    void continueAssemblingQuery() {
 
         // start here
         int urlBufferIndex = offsets[QUERY][INDEX];
@@ -1113,7 +1141,7 @@ public class FUrl {
     /**
      * Obtain this segment from the urlBuffer and copy it into the urlBuffer.
      */
-    private void assembleAnchor() {
+    void assembleAnchor() {
 
         // get the query, if there is one and we want it
         if (segmentDataExists(ANCHOR)) {
@@ -1267,7 +1295,7 @@ public class FUrl {
      *
      * @return how many character to skip
      */
-    private int omitPrecedingWww() {
+    int omitPrecedingWww() {
 
         int dotsSeen = 0;
         int charactersToSkip = 0;
@@ -1313,7 +1341,7 @@ public class FUrl {
      *
      * @param string to be assembled
      */
-    private void insertStringIntoAssemblyBuffer(String string) {
+    void insertStringIntoAssemblyBuffer(String string) {
         for (int i = 0; i < string.length(); i++) {
             assemblyBuffer[assemblyBufferIndex++] = string.charAt(i);
         }
@@ -1553,17 +1581,17 @@ public class FUrl {
                                     recordCount++;
                                     if (recordCount % 100000 == 0) {
                                         System.out.println("Parsed=" + recordCount
-                                                                   + " errors=" + errorCount
-                                                                   + " valid=" + validCount
-                                                                   + " invalid=" + invalidCount);
+                                                + " errors=" + errorCount
+                                                + " valid=" + validCount
+                                                + " invalid=" + invalidCount);
                                     }
                                 }
                             }
                         }
                         System.out.println("Total Parsed=" + recordCount
-                                                   + " errors=" + errorCount
-                                                   + " valid=" + validCount
-                                                   + " invalid=" + invalidCount);
+                                + " errors=" + errorCount
+                                + " valid=" + validCount
+                                + " invalid=" + invalidCount);
                     } catch (IOException e) {
                         System.out.println("error: " + e.getMessage());
                         e.printStackTrace();
@@ -1704,19 +1732,19 @@ public class FUrl {
                                 }
                                 if (lineCount % 1000 == 0) {
                                     System.out.println("Log URLs inspected=" + logUrlsInspected
-                                                               + " Joined=" + joined
-                                                               + " Missed=" + missed
-                                                               + " Invalid=" + hostnameInvalid
-                                                               + " Errors=" + logUrlsInError
-                                                               + " so far.");
+                                            + " Joined=" + joined
+                                            + " Missed=" + missed
+                                            + " Invalid=" + hostnameInvalid
+                                            + " Errors=" + logUrlsInError
+                                            + " so far.");
                                 }
                             }
                             System.out.println("Log URLs inspected=" + logUrlsInspected
-                                                       + " Joined=" + joined
-                                                       + " Missed=" + missed
-                                                       + " Invalid=" + hostnameInvalid
-                                                       + " Errors=" + logUrlsInError
-                                                       + " total.");
+                                    + " Joined=" + joined
+                                    + " Missed=" + missed
+                                    + " Invalid=" + hostnameInvalid
+                                    + " Errors=" + logUrlsInError
+                                    + " total.");
                         }
                     } catch (IOException e) {
                         System.out.println("error: " + e.getMessage());
@@ -1787,7 +1815,7 @@ public class FUrl {
         }
     }
 
-    private static String unreverseHostname(String hostname) {
+    static String unreverseHostname(String hostname) {
         String[] split = hostname.split("\\.");
         int len = split.length;
         if (len == 0) {
@@ -1805,9 +1833,8 @@ public class FUrl {
         return builder.toString();
     }
 
-    private static String removeDot(String s) {
+    static String removeDot(String s) {
         return s.substring(0, s.length() - 1);
     }
 
 }
-
